@@ -454,35 +454,46 @@ def scrape_by_brand(brand: str, code: str):
 # ------------------------------------------------------
 def send_mail(zip_path: str, title: str):
     try:
-        logger.info("[MAIL] Sending with Brevo SMTP...")
+        logger.info("[MAIL] Sending with Brevo API...")
 
-        SMTP_SERVER = os.getenv("SMTP_SERVER")
-        SMTP_PORT = int(os.getenv("SMTP_PORT"))
-        SMTP_LOGIN = os.getenv("SMTP_LOGIN")
-        SMTP_PASS = os.getenv("SMTP_PASS")
+        BREVO_API_KEY = os.getenv("BREVO_API_KEY")
+        if not BREVO_API_KEY:
+            logger.error("[MAIL ERROR] BREVO_API_KEY environment variable not set")
+            return
 
-        msg = MIMEMultipart()
-        msg["From"] = SMTP_LOGIN
-        msg["To"] = SMTP_LOGIN
-        msg["Subject"] = title
-
-        part = MIMEBase("application", "zip")
+        # ZIP dosyasını base64'e çevir
+        import base64
         with open(zip_path, "rb") as f:
-            part.set_payload(f.read())
-        encoders.encode_base64(part)
-        part.add_header("Content-Disposition", f"attachment; filename={title}.zip")
-        msg.attach(part)
+            file_b64 = base64.b64encode(f.read()).decode()
 
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(SMTP_LOGIN, SMTP_PASS)
-        server.send_message(msg)
-        server.quit()
+        url = "https://api.brevo.com/v3/smtp/email"
+        headers = {
+            "accept": "application/json",
+            "api-key": BREVO_API_KEY,
+            "content-type": "application/json"
+        }
 
-        logger.info("[MAIL] SENT ✓")
+        payload = {
+            "sender": {"email": "automations@weltrada.com"},
+            "to": [{"email": "automations@weltrada.com"}],
+            "subject": title,
+            "htmlContent": "<h3>Your automation ZIP is attached.</h3>",
+            "attachment": [
+                {
+                    "name": f"{title}.zip",
+                    "content": file_b64
+                }
+            ]
+        }
+
+        r = requests.post(url, json=payload, headers=headers)
+        if r.status_code in [200, 201]:
+            logger.info("[MAIL] OK ✓ (Brevo API)")
+        else:
+            logger.error(f"[MAIL ERROR] Brevo API responded with: {r.status_code} - {r.text}")
 
     except Exception as e:
-        logger.error(f"[MAIL ERROR] {e}")
+        logger.error(f"[MAIL ERROR] Exception: {e}")
 
 
 # ------------------------------------------------------
