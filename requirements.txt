@@ -4,6 +4,4 @@ pandas
 openpyxl
 requests
 pillow
-beautifulsoup4
 python-multipart
-googlesearch-python
