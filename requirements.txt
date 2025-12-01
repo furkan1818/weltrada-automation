@@ -1,5 +1,7 @@
 fastapi
 uvicorn
+pandas
+openpyxl
 requests
 pillow
 python-dotenv
