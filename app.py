@@ -1,19 +1,18 @@
-# ------------------------------------------------------
-# IMPORTS
-# ------------------------------------------------------
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+
 import os
-import pandas as pd
 import shutil
 import zipfile
 from datetime import datetime
+from io import BytesIO
+
+import logging
+import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from PIL import Image
-from io import BytesIO
-import logging
 
 
 # ------------------------------------------------------
@@ -27,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------
-# FASTAPI
+# FASTAPI CONFIG
 # ------------------------------------------------------
 app = FastAPI()
 
@@ -38,15 +37,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Render içindeki proje kökü
 BASE_DIR = "/opt/render/project/src"
+
+
+# ------------------------------------------------------
+# ROOT (TEST İÇİN)
+# ------------------------------------------------------
+@app.get("/")
+def root():
+    return {
+        "status": "ok",
+        "message": "Weltrada Automation API. Use POST /process-products with an Excel file."
+    }
 
 
 # ------------------------------------------------------
 # UTILS
 # ------------------------------------------------------
 def clean_filename(s: str) -> str:
-    """Dosya adı için basit temizleyici."""
+    """
+    Boşlukları - yapar, küçük harfe çevirir, sadece harf/rakam/-/_ bırakır.
+    """
     return "".join(
         c.lower()
         for c in s.replace(" ", "-")
@@ -55,12 +66,17 @@ def clean_filename(s: str) -> str:
 
 
 def download_image_to_webp(url: str, save_path: str) -> bool:
-    """URL'den görsel indirip .webp kaydeder."""
+    """
+    Verilen URL'den görsel indir, RGB'ye çevirip .webp kaydet.
+    """
     try:
         logger.info(f"[IMG] {url}")
-        r = requests.get(url, timeout=25)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; WeltradaBot/1.0; +https://weltrada.com)"
+        }
+        r = requests.get(url, timeout=25, headers=headers)
         if r.status_code != 200:
-            logger.warning(f"[IMG] {url} -> Status {r.status_code}")
+            logger.warning(f"[IMG ERROR] {url} -> Status {r.status_code}")
             return False
 
         img = Image.open(BytesIO(r.content))
@@ -74,12 +90,17 @@ def download_image_to_webp(url: str, save_path: str) -> bool:
 
 
 def download_file(url: str, save_path: str) -> bool:
-    """PDF vb. dosyayı indirip kaydeder."""
+    """
+    PDF gibi dosyaları indirir.
+    """
     try:
         logger.info(f"[FILE] {url}")
-        r = requests.get(url, timeout=25)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; WeltradaBot/1.0; +https://weltrada.com)"
+        }
+        r = requests.get(url, timeout=25, headers=headers)
         if r.status_code != 200:
-            logger.warning(f"[FILE] {url} -> Status {r.status_code}")
+            logger.warning(f"[FILE ERROR] {url} -> Status {r.status_code}")
             return False
 
         with open(save_path, "wb") as f:
@@ -92,10 +113,9 @@ def download_file(url: str, save_path: str) -> bool:
 
 
 # ------------------------------------------------------
-# PARSERS (7 MARKA)
+# PARSERS (TÜM MARKALAR)
 # ------------------------------------------------------
-
-# ================= SCHNEIDER =================
+# ------- SCHNEIDER -------
 def parse_schneider(code: str) -> dict:
     url_en = f"https://www.se.com/uk/en/product/{code}/"
     url_tr = f"https://www.se.com/tr/tr/product/{code}/"
@@ -115,21 +135,29 @@ def parse_schneider(code: str) -> dict:
         "images": []
     }
 
-    # EN
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; WeltradaBot/1.0; +https://weltrada.com)"
+    }
+
+    # EN ----------------------------------------------------------
     try:
-        r = requests.get(url_en, timeout=25)
+        r = requests.get(url_en, timeout=25, headers=headers)
         soup = BeautifulSoup(r.text, "html.parser")
 
+        # Ürün adı
         h = soup.find("h1")
         if h:
-            data["name_en"] = h.text.strip()
+            data["name_en"] = h.get_text(strip=True)
 
+        # Breadcrumbs + Category
         bc = soup.select("li[itemprop=itemListElement]")
         if bc:
-            data["breadcrumbs_en"] = " > ".join(i.text.strip() for i in bc)
-            if len(bc) >= 2:
-                data["category_en"] = bc[-2].text.strip()
+            crumbs = [i.get_text(strip=True) for i in bc]
+            data["breadcrumbs_en"] = " > ".join(crumbs)
+            if len(crumbs) >= 2:
+                data["category_en"] = crumbs[-2]
 
+        # Görseller (product içeren img src)
         imgs = soup.find_all("img")
         for img in imgs:
             src = img.get("src")
@@ -140,8 +168,10 @@ def parse_schneider(code: str) -> dict:
                     src = "https:" + src
                 if src.startswith("/"):
                     src = "https://www.se.com" + src
-                data["images"].append(src)
+                if src not in data["images"]:
+                    data["images"].append(src)
 
+        # Datasheet PDF
         pdf = soup.find("a", href=lambda x: x and x.endswith(".pdf"))
         if pdf:
             link = pdf["href"]
@@ -149,28 +179,33 @@ def parse_schneider(code: str) -> dict:
                 link = "https://www.se.com" + link
             data["datasheet_en"] = link
 
+        # EAN
         gtin = soup.find("span", {"itemprop": "gtin13"})
         if gtin:
-            data["ean"] = gtin.text.strip()
+            data["ean"] = gtin.get_text(strip=True)
 
     except Exception as e:
         logger.error(f"[SCHNEIDER EN ERROR] {code} -> {e}")
 
-    # TR
+    # TR ----------------------------------------------------------
     try:
-        r = requests.get(url_tr, timeout=25)
+        r = requests.get(url_tr, timeout=25, headers=headers)
         soup = BeautifulSoup(r.text, "html.parser")
 
+        # Ürün adı TR
         h = soup.find("h1")
         if h:
-            data["name_tr"] = h.text.strip()
+            data["name_tr"] = h.get_text(strip=True)
 
+        # Breadcrumbs + Category TR
         bc = soup.select("li[itemprop=itemListElement]")
         if bc:
-            data["breadcrumbs_tr"] = " > ".join(i.text.strip() for i in bc)
-            if len(bc) >= 2:
-                data["category_tr"] = bc[-2].text.strip()
+            crumbs = [i.get_text(strip=True) for i in bc]
+            data["breadcrumbs_tr"] = " > ".join(crumbs)
+            if len(crumbs) >= 2:
+                data["category_tr"] = crumbs[-2]
 
+        # Datasheet TR
         pdf = soup.find("a", href=lambda x: x and x.endswith(".pdf"))
         if pdf:
             link = pdf["href"]
@@ -184,7 +219,7 @@ def parse_schneider(code: str) -> dict:
     return data
 
 
-# ================= ABB =================
+# ------- ABB -------
 def parse_abb(code: str) -> dict:
     url_en = f"https://new.abb.com/products/{code}"
     url_tr = f"https://new.abb.com/products/tr/{code}"
@@ -204,42 +239,72 @@ def parse_abb(code: str) -> dict:
         "ean": ""
     }
 
-    # EN
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; WeltradaBot/1.0; +https://weltrada.com)"
+    }
+
+    # EN ----------------------------------------------------------
     try:
-        r = requests.get(url_en, timeout=25)
+        r = requests.get(url_en, timeout=25, headers=headers)
         soup = BeautifulSoup(r.text, "html.parser")
 
         h = soup.find("h1")
         if h:
-            data["name_en"] = h.text.strip()
+            data["name_en"] = h.get_text(strip=True)
 
+        # Breadcrumbs / kategori – site yapısına göre zayıf, gerekirse güçlendiririz
+        bc = soup.select("nav.breadcrumb li, nav.breadcrumb a")
+        if bc:
+            crumbs = [i.get_text(strip=True) for i in bc]
+            data["breadcrumbs_en"] = " > ".join(crumbs)
+            if len(crumbs) >= 2:
+                data["category_en"] = crumbs[-2]
+
+        # Ürüne ait gövsel
         imgs = soup.find_all("img")
         for i in imgs:
             src = i.get("src")
-            if src and code.lower() in src.lower():
+            if not src:
+                continue
+            if code.lower() in src.lower():
                 if src.startswith("/"):
                     src = "https://new.abb.com" + src
-                data["images"].append(src)
+                if src not in data["images"]:
+                    data["images"].append(src)
 
+        # Datasheet PDF (href içinde .pdf)
         pdf = soup.find("a", href=lambda x: x and ".pdf" in x)
         if pdf:
-            data["datasheet_en"] = pdf["href"]
+            link = pdf["href"]
+            if link.startswith("/"):
+                link = "https://new.abb.com" + link
+            data["datasheet_en"] = link
 
     except Exception as e:
         logger.error(f"[ABB EN ERROR] {code} -> {e}")
 
-    # TR
+    # TR ----------------------------------------------------------
     try:
-        r = requests.get(url_tr, timeout=25)
+        r = requests.get(url_tr, timeout=25, headers=headers)
         soup = BeautifulSoup(r.text, "html.parser")
 
         h = soup.find("h1")
         if h:
-            data["name_tr"] = h.text.strip()
+            data["name_tr"] = h.get_text(strip=True)
+
+        bc = soup.select("nav.breadcrumb li, nav.breadcrumb a")
+        if bc:
+            crumbs = [i.get_text(strip=True) for i in bc]
+            data["breadcrumbs_tr"] = " > ".join(crumbs)
+            if len(crumbs) >= 2:
+                data["category_tr"] = crumbs[-2]
 
         pdf = soup.find("a", href=lambda x: x and ".pdf" in x)
         if pdf:
-            data["datasheet_tr"] = pdf["href"]
+            link = pdf["href"]
+            if link.startswith("/"):
+                link = "https://new.abb.com" + link
+            data["datasheet_tr"] = link
 
     except Exception as e:
         logger.error(f"[ABB TR ERROR] {code} -> {e}")
@@ -247,7 +312,7 @@ def parse_abb(code: str) -> dict:
     return data
 
 
-# ================= ALLEN BRADLEY =================
+# ------- ALLEN BRADLEY -------
 def parse_allen(code: str) -> dict:
     url = f"https://www.rockwellautomation.com/en-dk/products/details.{code}.html"
 
@@ -261,27 +326,35 @@ def parse_allen(code: str) -> dict:
         "images": []
     }
 
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; WeltradaBot/1.0; +https://weltrada.com)"
+    }
+
     try:
-        r = requests.get(url, timeout=25)
+        r = requests.get(url, timeout=25, headers=headers)
         soup = BeautifulSoup(r.text, "html.parser")
 
         h = soup.find("h1")
         if h:
-            data["name_en"] = h.text.strip()
+            data["name_en"] = h.get_text(strip=True)
 
         crumbs = soup.select("li.breadcrumb-item")
         if crumbs:
-            data["breadcrumbs_en"] = " > ".join(i.text.strip() for i in crumbs)
-            if len(crumbs) >= 2:
-                data["category_en"] = crumbs[-2].text.strip()
+            crumb_texts = [i.get_text(strip=True) for i in crumbs]
+            data["breadcrumbs_en"] = " > ".join(crumb_texts)
+            if len(crumb_texts) >= 2:
+                data["category_en"] = crumb_texts[-2]
 
         imgs = soup.find_all("img")
         for i in imgs:
             src = i.get("src")
-            if src and code in src:
+            if not src:
+                continue
+            if code in src:
                 if src.startswith("/"):
                     src = "https://www.rockwellautomation.com" + src
-                data["images"].append(src)
+                if src not in data["images"]:
+                    data["images"].append(src)
 
         pdf = soup.find("a", href=lambda x: x and x.endswith(".pdf"))
         if pdf:
@@ -296,7 +369,7 @@ def parse_allen(code: str) -> dict:
     return data
 
 
-# ================= EATON =================
+# ------- EATON -------
 def parse_eaton(code: str) -> dict:
     url_en = f"https://www.eaton.com/gb/en-gb/skuPage.{code}.html#tab-2"
 
@@ -304,27 +377,39 @@ def parse_eaton(code: str) -> dict:
         "brand": "Eaton",
         "code": code,
         "name_en": "",
+        "name_tr": "",
         "breadcrumbs_en": "",
+        "breadcrumbs_tr": "",
         "category_en": "",
+        "category_tr": "",
         "datasheet_en": "",
+        "datasheet_tr": "",
         "images": []
     }
 
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; WeltradaBot/1.0; +https://weltrada.com)"
+    }
+
     try:
-        r = requests.get(url_en, timeout=25)
+        r = requests.get(url_en, timeout=25, headers=headers)
         soup = BeautifulSoup(r.text, "html.parser")
 
         h = soup.find("h1")
         if h:
-            data["name_en"] = h.text.strip()
+            data["name_en"] = h.get_text(strip=True)
 
+        # (Breadcrumb yapısı siteye göre değişebilir; şu an sadece görsel + isim)
         imgs = soup.find_all("img")
         for i in imgs:
             src = i.get("src")
-            if src and code.lower() in src.lower():
+            if not src:
+                continue
+            if code.lower() in src.lower():
                 if src.startswith("/"):
                     src = "https://www.eaton.com" + src
-                data["images"].append(src)
+                if src not in data["images"]:
+                    data["images"].append(src)
 
     except Exception as e:
         logger.error(f"[EATON ERROR] {code} -> {e}")
@@ -332,9 +417,10 @@ def parse_eaton(code: str) -> dict:
     return data
 
 
-# ================= LEGRAND =================
+# ------- LEGRAND -------
 def parse_legrand(code: str) -> dict:
-    # Örnek: sabit ürün sayfası (sen sadece kodu kullanıyorsun zaten)
+    # Şimdilik tek örnek ürün üzerinden gidiyoruz (030191).
+    # Legrand sitesi product code ile URL almaya izin veriyorsa sonra güncelleriz.
     url = "https://www.legrand.at/de/katalog/produkte/innen-aussenwinkel-16x16-weiss-030191"
 
     data = {
@@ -343,32 +429,40 @@ def parse_legrand(code: str) -> dict:
         "name_de": "",
         "breadcrumbs_de": "",
         "category_de": "",
-        "images": [],
         "datasheet_en": "",
-        "datasheet_tr": ""
+        "datasheet_tr": "",
+        "images": []
+    }
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; WeltradaBot/1.0; +https://weltrada.com)"
     }
 
     try:
-        r = requests.get(url, timeout=25)
+        r = requests.get(url, timeout=25, headers=headers)
         soup = BeautifulSoup(r.text, "html.parser")
 
         h = soup.find("h1")
         if h:
-            data["name_de"] = h.text.strip()
+            data["name_de"] = h.get_text(strip=True)
 
         crumbs = soup.select("ul.breadcrumb li")
         if crumbs:
-            data["breadcrumbs_de"] = " > ".join(i.text.strip() for i in crumbs)
-            if len(crumbs) >= 2:
-                data["category_de"] = crumbs[-2].text.strip()
+            crumb_texts = [i.get_text(strip=True) for i in crumbs]
+            data["breadcrumbs_de"] = " > ".join(crumb_texts)
+            if len(crumb_texts) >= 2:
+                data["category_de"] = crumb_texts[-2]
 
         imgs = soup.find_all("img")
         for i in imgs:
             src = i.get("src")
-            if src and "030191" in src:
+            if not src:
+                continue
+            if "030191" in src:
                 if src.startswith("/"):
                     src = "https://www.legrand.at" + src
-                data["images"].append(src)
+                if src not in data["images"]:
+                    data["images"].append(src)
 
     except Exception as e:
         logger.error(f"[LEGRAND ERROR] {code} -> {e}")
@@ -376,7 +470,7 @@ def parse_legrand(code: str) -> dict:
     return data
 
 
-# ================= WAGO =================
+# ------- WAGO -------
 def parse_wago(code: str) -> dict:
     url_en = f"https://www.wago.com/global/marking/roller/p/{code}"
 
@@ -384,26 +478,38 @@ def parse_wago(code: str) -> dict:
         "brand": "Wago",
         "code": code,
         "name_en": "",
-        "category_en": "",
+        "name_tr": "",
         "breadcrumbs_en": "",
+        "breadcrumbs_tr": "",
+        "category_en": "",
+        "category_tr": "",
+        "datasheet_en": "",
+        "datasheet_tr": "",
         "images": []
     }
 
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; WeltradaBot/1.0; +https://weltrada.com)"
+    }
+
     try:
-        r = requests.get(url_en, timeout=25)
+        r = requests.get(url_en, timeout=25, headers=headers)
         soup = BeautifulSoup(r.text, "html.parser")
 
         h = soup.find("h1")
         if h:
-            data["name_en"] = h.text.strip()
+            data["name_en"] = h.get_text(strip=True)
 
         imgs = soup.find_all("img")
         for i in imgs:
             src = i.get("src")
-            if src and code in src:
+            if not src:
+                continue
+            if code in src:
                 if src.startswith("/"):
                     src = "https://www.wago.com" + src
-                data["images"].append(src)
+                if src not in data["images"]:
+                    data["images"].append(src)
 
     except Exception as e:
         logger.error(f"[WAGO ERROR] {code} -> {e}")
@@ -411,7 +517,7 @@ def parse_wago(code: str) -> dict:
     return data
 
 
-# ================= SIEMENS =================
+# ------- SIEMENS -------
 def parse_siemens(code: str) -> dict:
     url = f"https://mall.industry.siemens.com/mall/en/oeii/Catalog/Product/{code}"
 
@@ -419,32 +525,42 @@ def parse_siemens(code: str) -> dict:
         "brand": "Siemens",
         "code": code,
         "name_en": "",
-        "category_en": "",
         "breadcrumbs_en": "",
+        "category_en": "",
+        "datasheet_en": "",
+        "datasheet_tr": "",
         "images": []
     }
 
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; WeltradaBot/1.0; +https://weltrada.com)"
+    }
+
     try:
-        r = requests.get(url, timeout=25)
+        r = requests.get(url, timeout=25, headers=headers)
         soup = BeautifulSoup(r.text, "html.parser")
 
         h = soup.find("h1")
         if h:
-            data["name_en"] = h.text.strip()
+            data["name_en"] = h.get_text(strip=True)
 
         crumbs = soup.select("ul.breadcrumb li")
         if crumbs:
-            data["breadcrumbs_en"] = " > ".join(i.text.strip() for i in crumbs)
-            if len(crumbs) >= 2:
-                data["category_en"] = crumbs[-2].text.strip()
+            crumb_texts = [i.get_text(strip=True) for i in crumbs]
+            data["breadcrumbs_en"] = " > ".join(crumb_texts)
+            if len(crumb_texts) >= 2:
+                data["category_en"] = crumb_texts[-2]
 
         imgs = soup.find_all("img")
         for i in imgs:
             src = i.get("src")
-            if src and code.lower() in src.lower():
+            if not src:
+                continue
+            if code.lower() in src.lower():
                 if src.startswith("/"):
                     src = "https://mall.industry.siemens.com" + src
-                data["images"].append(src)
+                if src not in data["images"]:
+                    data["images"].append(src)
 
     except Exception as e:
         logger.error(f"[SIEMENS ERROR] {code} -> {e}")
@@ -479,17 +595,6 @@ def scrape_by_brand(brand: str, code: str):
 
 
 # ------------------------------------------------------
-# API: ROOT (opsiyonel, 404 yerine küçük mesaj)
-# ------------------------------------------------------
-@app.get("/")
-def root():
-    return {
-        "message": "Weltrada Automation API is running.",
-        "usage": "POST /process-products with form-data: file=<Excel>"
-    }
-
-
-# ------------------------------------------------------
 # API: PROCESS PRODUCTS (NO MAIL)
 # ------------------------------------------------------
 @app.post("/process-products")
@@ -501,10 +606,16 @@ async def process_products(file: UploadFile = File(...)):
     root_folder = f"Research-{time_str}"
     root_path = os.path.join(BASE_DIR, root_folder)
 
-    os.makedirs(root_path, exist_ok=True)
-    os.makedirs(os.path.join(root_path, "Images"), exist_ok=True)
-    os.makedirs(os.path.join(root_path, "Info/en/Breadcrumbs"), exist_ok=True)
-    os.makedirs(os.path.join(root_path, "Info/tr/Sayfa-Yollari"), exist_ok=True)
+    # Klasörler
+    images_root = os.path.join(root_path, "Images")
+    info_en_breadcrumbs = os.path.join(root_path, "Info", "en", "Breadcrumbs")
+    info_tr_breadcrumbs = os.path.join(root_path, "Info", "tr", "Sayfa-Yolları")
+    datasheets_root = os.path.join(root_path, "Datasheets")
+
+    os.makedirs(images_root, exist_ok=True)
+    os.makedirs(info_en_breadcrumbs, exist_ok=True)
+    os.makedirs(info_tr_breadcrumbs, exist_ok=True)
+    os.makedirs(datasheets_root, exist_ok=True)
 
     # Excel kaydet
     excel_path = os.path.join(root_path, "uploaded.xlsx")
@@ -518,21 +629,16 @@ async def process_products(file: UploadFile = File(...)):
     tr_rows = []
 
     for idx, row in df.iterrows():
-        brand = str(row.get("brand", "")).strip()
-        code = str(row.get("product_code", "")).strip().upper()
-
-        if not brand or not code:
-            logger.warning(f"[ROW {idx}] EMPTY brand/code")
-            continue
+        brand = str(row["brand"]).strip()
+        code = str(row["product_code"]).strip().upper()
 
         logger.info(f"[ROW {idx}] {brand} - {code}")
 
         d = scrape_by_brand(brand, code)
         if not d:
-            logger.warning(f"[ROW {idx}] NO DATA - {brand} {code}")
             continue
 
-        # EN Excel
+        # EN Excel satırı
         en_rows.append({
             "Product Code": code,
             "Brand": brand,
@@ -540,7 +646,7 @@ async def process_products(file: UploadFile = File(...)):
             "Category": d.get("category_en", d.get("category_de", ""))
         })
 
-        # TR Excel
+        # TR Excel satırı
         tr_rows.append({
             "Ürün kodu": code,
             "Marka": brand,
@@ -549,17 +655,17 @@ async def process_products(file: UploadFile = File(...)):
         })
 
         # Breadcrumb EN / TR
-        bc_en = d.get("breadcrumbs_en") or d.get("breadcrumbs_de") or ""
-        bc_tr = d.get("breadcrumbs_tr") or bc_en
+        bc_en = d.get("breadcrumbs_en", d.get("breadcrumbs_de", ""))
+        bc_tr = d.get("breadcrumbs_tr", bc_en)
 
-        with open(os.path.join(root_path, f"Info/en/Breadcrumbs/{code}-breadcrumbs.txt"), "w") as f:
-            f.write(bc_en)
+        with open(os.path.join(info_en_breadcrumbs, f"{code}-breadcrumbs.txt"), "w", encoding="utf-8") as f_en:
+            f_en.write(bc_en or "")
 
-        with open(os.path.join(root_path, f"Info/tr/Sayfa-Yollari/{code}-sayfa-yolu.txt"), "w") as f:
-            f.write(bc_tr)
+        with open(os.path.join(info_tr_breadcrumbs, f"{code}-sayfa-yolu.txt"), "w", encoding="utf-8") as f_tr:
+            f_tr.write(bc_tr or "")
 
         # Görseller
-        img_dir = os.path.join(root_path, "Images", code)
+        img_dir = os.path.join(images_root, code)
         os.makedirs(img_dir, exist_ok=True)
 
         count = 1
@@ -571,28 +677,29 @@ async def process_products(file: UploadFile = File(...)):
 
         # Datasheet EN
         if d.get("datasheet_en"):
-            download_file(
-                d["datasheet_en"],
-                os.path.join(root_path, f"{code}-Datasheet-en.pdf")
-            )
+            ds_en_path = os.path.join(datasheets_root, f"{code}-datasheet-en.pdf")
+            download_file(d["datasheet_en"], ds_en_path)
 
         # Datasheet TR
         if d.get("datasheet_tr"):
-            download_file(
-                d["datasheet_tr"],
-                os.path.join(root_path, f"{code}-Datasheet-tr.pdf")
-            )
+            ds_tr_path = os.path.join(datasheets_root, f"{code}-datasheet-tr.pdf")
+            download_file(d["datasheet_tr"], ds_tr_path)
 
-    # Excel yaz
+    # Excel dosyaları
+    info_en_dir = os.path.join(root_path, "Info", "en")
+    info_tr_dir = os.path.join(root_path, "Info", "tr")
+    os.makedirs(info_en_dir, exist_ok=True)
+    os.makedirs(info_tr_dir, exist_ok=True)
+
     if en_rows:
         pd.DataFrame(en_rows).to_excel(
-            os.path.join(root_path, "Info/en/products-info.xlsx"),
+            os.path.join(info_en_dir, "products-info.xlsx"),
             index=False
         )
 
     if tr_rows:
         pd.DataFrame(tr_rows).to_excel(
-            os.path.join(root_path, "Info/tr/urun-detaylari.xlsx"),
+            os.path.join(info_tr_dir, "urun-detaylari.xlsx"),
             index=False
         )
 
@@ -601,15 +708,15 @@ async def process_products(file: UploadFile = File(...)):
     zip_path = os.path.join(BASE_DIR, zip_name)
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-        for r, _, files in os.walk(root_path):
+        for root_dir, _, files in os.walk(root_path):
             for f in files:
-                fp = os.path.join(r, f)
+                fp = os.path.join(root_dir, f)
                 rel = os.path.relpath(fp, root_path)
                 z.write(fp, rel)
 
     logger.info(f"[API] DONE ✓ ZIP: {zip_name}")
 
-    # Render'da /static altında serve ediyoruz
+    # Render static URL
     download_url = f"https://weltrada-automation.onrender.com/static/{zip_name}"
 
     return {
