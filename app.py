@@ -9,10 +9,6 @@ import requests
 from bs4 import BeautifulSoup
 from PIL import Image
 from io import BytesIO
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email import encoders
 import logging
 
 
@@ -27,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------
-# FASTAPI APP
+# FASTAPI CONFIG
 # ------------------------------------------------------
 app = FastAPI()
 
@@ -57,37 +53,37 @@ def download_image_to_webp(url: str, save_path: str) -> bool:
         logger.info(f"[IMG] {url}")
         r = requests.get(url, timeout=25)
         if r.status_code != 200:
-            logger.warning(f"[IMG] {url} -> Status {r.status_code}")
             return False
 
         img = Image.open(BytesIO(r.content))
         img = img.convert("RGB")
         img.save(save_path, "webp")
         return True
+
     except Exception as e:
-        logger.error(f"[IMG] ERROR {url} -> {e}")
+        logger.error(f"[IMG ERROR] {url} -> {e}")
         return False
 
 
 def download_file(url: str, save_path: str) -> bool:
     try:
-        logger.info(f"[FILE] {url}")
         r = requests.get(url, timeout=25)
         if r.status_code != 200:
-            logger.warning(f"[FILE] {url} -> Status {r.status_code}")
             return False
 
         with open(save_path, "wb") as f:
             f.write(r.content)
         return True
+
     except Exception as e:
-        logger.error(f"[FILE] ERROR {url} -> {e}")
+        logger.error(f"[FILE ERROR] {url} -> {e}")
         return False
 
 
 # ------------------------------------------------------
-# PARSER FUNCTIONS (BRANDS)
+# PARSERS (TÜM MARKALAR)
 # ------------------------------------------------------
+# ------- SCHNEIDER -------
 def parse_schneider(code: str) -> dict:
     url_en = f"https://www.se.com/uk/en/product/{code}/"
     url_tr = f"https://www.se.com/tr/tr/product/{code}/"
@@ -145,7 +141,7 @@ def parse_schneider(code: str) -> dict:
             data["ean"] = gtin.text.strip()
 
     except Exception as e:
-        logger.error(f"[SCHNEIDER EN] {code} -> {e}")
+        logger.error(f"[SCHNEIDER EN ERROR] {code} -> {e}")
 
     try:
         r = requests.get(url_tr, timeout=25)
@@ -169,11 +165,12 @@ def parse_schneider(code: str) -> dict:
             data["datasheet_tr"] = link
 
     except Exception as e:
-        logger.error(f"[SCHNEIDER TR] {code} -> {e}")
+        logger.error(f"[SCHNEIDER TR ERROR] {code} -> {e}")
 
     return data
 
 
+# ------- ABB -------
 def parse_abb(code: str) -> dict:
     url_en = f"https://new.abb.com/products/{code}"
     url_tr = f"https://new.abb.com/products/tr/{code}"
@@ -214,7 +211,7 @@ def parse_abb(code: str) -> dict:
             data["datasheet_en"] = pdf["href"]
 
     except Exception as e:
-        logger.error(f"[ABB EN] {code} -> {e}")
+        logger.error(f"[ABB EN ERROR] {code} -> {e}")
 
     try:
         r = requests.get(url_tr, timeout=25)
@@ -229,11 +226,12 @@ def parse_abb(code: str) -> dict:
             data["datasheet_tr"] = pdf["href"]
 
     except Exception as e:
-        logger.error(f"[ABB TR] {code} -> {e}")
+        logger.error(f"[ABB TR ERROR] {code} -> {e}")
 
     return data
 
 
+# ------- ALLEN BRADLEY -------
 def parse_allen(code: str) -> dict:
     url = f"https://www.rockwellautomation.com/en-dk/products/details.{code}.html"
 
@@ -277,11 +275,12 @@ def parse_allen(code: str) -> dict:
             data["datasheet_en"] = link
 
     except Exception as e:
-        logger.error(f"[ALLEN] {code} -> {e}")
+        logger.error(f"[ALLEN ERROR] {code} -> {e}")
 
     return data
 
 
+# ------- EATON -------
 def parse_eaton(code: str) -> dict:
     url_en = f"https://www.eaton.com/gb/en-gb/skuPage.{code}.html#tab-2"
 
@@ -289,12 +288,20 @@ def parse_eaton(code: str) -> dict:
         "brand": "Eaton",
         "code": code,
         "name_en": "",
+        "name_tr": "",
+        "breadcrumbs_en": "",
+        "breadcrumbs_tr": "",
+        "category_en": "",
+        "category_tr": "",
+        "datasheet_en": "",
+        "datasheet_tr": "",
         "images": []
     }
 
     try:
         r = requests.get(url_en, timeout=25)
         soup = BeautifulSoup(r.text, "html.parser")
+
         h = soup.find("h1")
         if h:
             data["name_en"] = h.text.strip()
@@ -308,11 +315,12 @@ def parse_eaton(code: str) -> dict:
                 data["images"].append(src)
 
     except Exception as e:
-        logger.error(f"[EATON EN] {code} -> {e}")
+        logger.error(f"[EATON EN ERROR] {code} -> {e}")
 
     return data
 
 
+# ------- LEGRAND -------
 def parse_legrand(code: str) -> dict:
     url = "https://www.legrand.at/de/katalog/produkte/innen-aussenwinkel-16x16-weiss-030191"
 
@@ -322,7 +330,9 @@ def parse_legrand(code: str) -> dict:
         "name_de": "",
         "breadcrumbs_de": "",
         "category_de": "",
-        "images": []
+        "images": [],
+        "datasheet_en": "",
+        "datasheet_tr": ""
     }
 
     try:
@@ -348,11 +358,12 @@ def parse_legrand(code: str) -> dict:
                 data["images"].append(src)
 
     except Exception as e:
-        logger.error(f"[LEGRAND] {code} -> {e}")
+        logger.error(f"[LEGRAND ERROR] {code} -> {e}")
 
     return data
 
 
+# ------- WAGO -------
 def parse_wago(code: str) -> dict:
     url_en = f"https://www.wago.com/global/marking/roller/p/{code}"
 
@@ -360,12 +371,20 @@ def parse_wago(code: str) -> dict:
         "brand": "Wago",
         "code": code,
         "name_en": "",
+        "name_tr": "",
+        "breadcrumbs_en": "",
+        "breadcrumbs_tr": "",
+        "category_en": "",
+        "category_tr": "",
+        "datasheet_en": "",
+        "datasheet_tr": "",
         "images": []
     }
 
     try:
         r = requests.get(url_en, timeout=25)
         soup = BeautifulSoup(r.text, "html.parser")
+
         h = soup.find("h1")
         if h:
             data["name_en"] = h.text.strip()
@@ -379,11 +398,12 @@ def parse_wago(code: str) -> dict:
                 data["images"].append(src)
 
     except Exception as e:
-        logger.error(f"[WAGO EN] {code} -> {e}")
+        logger.error(f"[WAGO ERROR] {code} -> {e}")
 
     return data
 
 
+# ------- SIEMENS -------
 def parse_siemens(code: str) -> dict:
     url = f"https://mall.industry.siemens.com/mall/en/oeii/Catalog/Product/{code}"
 
@@ -393,12 +413,15 @@ def parse_siemens(code: str) -> dict:
         "name_en": "",
         "breadcrumbs_en": "",
         "category_en": "",
+        "datasheet_en": "",
+        "datasheet_tr": "",
         "images": []
     }
 
     try:
         r = requests.get(url, timeout=25)
         soup = BeautifulSoup(r.text, "html.parser")
+
         h = soup.find("h1")
         if h:
             data["name_en"] = h.text.strip()
@@ -418,7 +441,7 @@ def parse_siemens(code: str) -> dict:
                 data["images"].append(src)
 
     except Exception as e:
-        logger.error(f"[SIEMENS] {code} -> {e}")
+        logger.error(f"[SIEMENS ERROR] {code} -> {e}")
 
     return data
 
@@ -445,64 +468,18 @@ def scrape_by_brand(brand: str, code: str):
     if "siemens" in b:
         return parse_siemens(code)
 
-    logger.warning(f"[SCRAPE] No parser found for {brand}")
+    logger.warning(f"[SCRAPE] No parser found for brand {brand}")
     return None
 
 
 # ------------------------------------------------------
-# MAIL SENDER (BREVO SMTP)
-# ------------------------------------------------------
-def send_mail(zip_path: str, title: str):
-    try:
-        logger.info("[MAIL] Sending with Brevo API...")
-
-        BREVO_API_KEY = os.getenv("BREVO_API_KEY")
-        if not BREVO_API_KEY:
-            logger.error("[MAIL ERROR] BREVO_API_KEY environment variable not set")
-            return
-
-        # ZIP dosyasını base64'e çevir
-        import base64
-        with open(zip_path, "rb") as f:
-            file_b64 = base64.b64encode(f.read()).decode()
-
-        url = "https://api.brevo.com/v3/smtp/email"
-        headers = {
-            "accept": "application/json",
-            "api-key": BREVO_API_KEY,
-            "content-type": "application/json"
-        }
-
-        payload = {
-            "sender": {"email": "automations@weltrada.com"},
-            "to": [{"email": "automations@weltrada.com"}],
-            "subject": title,
-            "htmlContent": "<h3>Your automation ZIP is attached.</h3>",
-            "attachment": [
-                {
-                    "name": f"{title}.zip",
-                    "content": file_b64
-                }
-            ]
-        }
-
-        r = requests.post(url, json=payload, headers=headers)
-        if r.status_code in [200, 201]:
-            logger.info("[MAIL] OK ✓ (Brevo API)")
-        else:
-            logger.error(f"[MAIL ERROR] Brevo API responded with: {r.status_code} - {r.text}")
-
-    except Exception as e:
-        logger.error(f"[MAIL ERROR] Exception: {e}")
-
-
-# ------------------------------------------------------
-# MAIN ENDPOINT
+# API: PROCESS PRODUCTS (NO MAIL)
 # ------------------------------------------------------
 @app.post("/process-products")
 async def process_products(file: UploadFile = File(...)):
     logger.info("[API] /process-products")
 
+    # Ana klasör
     time_str = datetime.now().strftime("%d-%m-%Y-at-%H-%M")
     root_folder = f"Research-{time_str}"
     root_path = os.path.join(BASE_DIR, root_folder)
@@ -512,6 +489,7 @@ async def process_products(file: UploadFile = File(...)):
     os.makedirs(os.path.join(root_path, "Info/en/Breadcrumbs"), exist_ok=True)
     os.makedirs(os.path.join(root_path, "Info/tr/Sayfa-Yolları"), exist_ok=True)
 
+    # Excel kaydet
     excel_path = os.path.join(root_path, "uploaded.xlsx")
     with open(excel_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -525,12 +503,14 @@ async def process_products(file: UploadFile = File(...)):
     for idx, row in df.iterrows():
         brand = str(row["brand"]).strip()
         code = str(row["product_code"]).strip().upper()
+
         logger.info(f"[ROW {idx}] {brand} - {code}")
 
         d = scrape_by_brand(brand, code)
         if not d:
             continue
 
+        # EN Excel
         en_rows.append({
             "Product Code": code,
             "Brand": brand,
@@ -538,6 +518,7 @@ async def process_products(file: UploadFile = File(...)):
             "Category": d.get("category_en", d.get("category_de", ""))
         })
 
+        # TR Excel
         tr_rows.append({
             "Ürün kodu": code,
             "Marka": brand,
@@ -545,15 +526,17 @@ async def process_products(file: UploadFile = File(...)):
             "Kategori": d.get("category_tr", d.get("category_en", d.get("category_de", "")))
         })
 
+        # Breadcrumb EN / TR
         bc_en = d.get("breadcrumbs_en", d.get("breadcrumbs_de", ""))
         bc_tr = d.get("breadcrumbs_tr", bc_en)
 
         with open(os.path.join(root_path, f"Info/en/Breadcrumbs/{code}-breadcrumbs.txt"), "w") as f:
-            f.write(bc_en or "")
+            f.write(bc_en)
 
         with open(os.path.join(root_path, f"Info/tr/Sayfa-Yolları/{code}-sayfa-yolu.txt"), "w") as f:
-            f.write(bc_tr or "")
+            f.write(bc_tr)
 
+        # Görseller
         img_dir = os.path.join(root_path, "Images", code)
         os.makedirs(img_dir, exist_ok=True)
 
@@ -561,32 +544,37 @@ async def process_products(file: UploadFile = File(...)):
         for url in d.get("images", []):
             filename = f"{clean_filename(brand)}-{code.lower()}-{count:03d}.webp"
             save_path = os.path.join(img_dir, filename)
-            ok = download_image_to_webp(url, save_path)
-            if ok:
+            if download_image_to_webp(url, save_path):
                 count += 1
 
+        # Datasheet EN
         if d.get("datasheet_en"):
             download_file(
                 d["datasheet_en"],
                 os.path.join(root_path, f"{code}-Datasheet-en.pdf")
             )
 
+        # Datasheet TR
         if d.get("datasheet_tr"):
             download_file(
                 d["datasheet_tr"],
                 os.path.join(root_path, f"{code}-Datasheet-tr.pdf")
             )
 
+    # Excel yaz
     if en_rows:
         pd.DataFrame(en_rows).to_excel(
-            os.path.join(root_path, "Info/en/products-info.xlsx"), index=False
+            os.path.join(root_path, "Info/en/products-info.xlsx"),
+            index=False
         )
 
     if tr_rows:
         pd.DataFrame(tr_rows).to_excel(
-            os.path.join(root_path, "Info/tr/ürünleri-detay.xlsx"), index=False
+            os.path.join(root_path, "Info/tr/urun-detaylari.xlsx"),
+            index=False
         )
 
+    # ZIP DOSYASI
     zip_name = f"{root_folder}.zip"
     zip_path = os.path.join(BASE_DIR, zip_name)
 
@@ -597,8 +585,22 @@ async def process_products(file: UploadFile = File(...)):
                 rel = os.path.relpath(fp, root_path)
                 z.write(fp, rel)
 
-    send_mail(zip_path, root_folder)
-
+    # Mail yok — sadece path dönecek
     logger.info("[API] DONE ✓")
 
-    return {"status": "success", "zip": zip_name}
+    # Render üzerinde indirilebilir URL formatı:
+    download_url = f"https://weltrada-automation.onrender.com/static/{zip_name}"
+
+    return {
+        "status": "success",
+        "zip_file": zip_name,
+        "download_url": download_url
+    }
+
+
+# ------------------------------------------------------
+# STATIC FILES SERVE (ZIP İNDİRME)
+# ------------------------------------------------------
+from fastapi.staticfiles import StaticFiles
+
+app.mount("/static", StaticFiles(directory=BASE_DIR), name="static")
