@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------
-# FASTAPI
+# FASTAPI APP
 # ------------------------------------------------------
 app = FastAPI()
 
@@ -64,31 +64,30 @@ def download_image_to_webp(url: str, save_path: str) -> bool:
         img = img.convert("RGB")
         img.save(save_path, "webp")
         return True
-
     except Exception as e:
-        logger.error(f"[IMG ERROR] {url} -> {e}")
+        logger.error(f"[IMG] ERROR {url} -> {e}")
         return False
 
 
 def download_file(url: str, save_path: str) -> bool:
     try:
+        logger.info(f"[FILE] {url}")
         r = requests.get(url, timeout=25)
         if r.status_code != 200:
+            logger.warning(f"[FILE] {url} -> Status {r.status_code}")
             return False
 
         with open(save_path, "wb") as f:
             f.write(r.content)
         return True
-
     except Exception as e:
-        logger.error(f"[FILE ERROR] {url} -> {e}")
+        logger.error(f"[FILE] ERROR {url} -> {e}")
         return False
 
 
 # ------------------------------------------------------
-# PARSERS (MARKALAR)
+# PARSER FUNCTIONS (BRANDS)
 # ------------------------------------------------------
-
 def parse_schneider(code: str) -> dict:
     url_en = f"https://www.se.com/uk/en/product/{code}/"
     url_tr = f"https://www.se.com/tr/tr/product/{code}/"
@@ -113,7 +112,8 @@ def parse_schneider(code: str) -> dict:
         soup = BeautifulSoup(r.text, "html.parser")
 
         h = soup.find("h1")
-        if h: data["name_en"] = h.text.strip()
+        if h:
+            data["name_en"] = h.text.strip()
 
         bc = soup.select("li[itemprop=itemListElement]")
         if bc:
@@ -124,15 +124,20 @@ def parse_schneider(code: str) -> dict:
         imgs = soup.find_all("img")
         for img in imgs:
             src = img.get("src")
-            if src and "/product/" in src:
-                if src.startswith("//"): src = "https:" + src
-                if src.startswith("/"): src = "https://www.se.com" + src
+            if not src:
+                continue
+            if "/product/" in src:
+                if src.startswith("//"):
+                    src = "https:" + src
+                if src.startswith("/"):
+                    src = "https://www.se.com" + src
                 data["images"].append(src)
 
         pdf = soup.find("a", href=lambda x: x and x.endswith(".pdf"))
         if pdf:
             link = pdf["href"]
-            if link.startswith("/"): link = "https://www.se.com" + link
+            if link.startswith("/"):
+                link = "https://www.se.com" + link
             data["datasheet_en"] = link
 
         gtin = soup.find("span", {"itemprop": "gtin13"})
@@ -147,7 +152,8 @@ def parse_schneider(code: str) -> dict:
         soup = BeautifulSoup(r.text, "html.parser")
 
         h = soup.find("h1")
-        if h: data["name_tr"] = h.text.strip()
+        if h:
+            data["name_tr"] = h.text.strip()
 
         bc = soup.select("li[itemprop=itemListElement]")
         if bc:
@@ -158,7 +164,8 @@ def parse_schneider(code: str) -> dict:
         pdf = soup.find("a", href=lambda x: x and x.endswith(".pdf"))
         if pdf:
             link = pdf["href"]
-            if link.startswith("/"): link = "https://www.se.com" + link
+            if link.startswith("/"):
+                link = "https://www.se.com" + link
             data["datasheet_tr"] = link
 
     except Exception as e:
@@ -191,13 +198,15 @@ def parse_abb(code: str) -> dict:
         soup = BeautifulSoup(r.text, "html.parser")
 
         h = soup.find("h1")
-        if h: data["name_en"] = h.text.strip()
+        if h:
+            data["name_en"] = h.text.strip()
 
         imgs = soup.find_all("img")
         for i in imgs:
             src = i.get("src")
             if src and code.lower() in src.lower():
-                if src.startswith("/"): src = "https://new.abb.com" + src
+                if src.startswith("/"):
+                    src = "https://new.abb.com" + src
                 data["images"].append(src)
 
         pdf = soup.find("a", href=lambda x: x and ".pdf" in x)
@@ -212,7 +221,8 @@ def parse_abb(code: str) -> dict:
         soup = BeautifulSoup(r.text, "html.parser")
 
         h = soup.find("h1")
-        if h: data["name_tr"] = h.text.strip()
+        if h:
+            data["name_tr"] = h.text.strip()
 
         pdf = soup.find("a", href=lambda x: x and ".pdf" in x)
         if pdf:
@@ -242,7 +252,8 @@ def parse_allen(code: str) -> dict:
         soup = BeautifulSoup(r.text, "html.parser")
 
         h = soup.find("h1")
-        if h: data["name_en"] = h.text.strip()
+        if h:
+            data["name_en"] = h.text.strip()
 
         crumbs = soup.select("li.breadcrumb-item")
         if crumbs:
@@ -254,7 +265,8 @@ def parse_allen(code: str) -> dict:
         for i in imgs:
             src = i.get("src")
             if src and code in src:
-                if src.startswith("/"): src = "https://www.rockwellautomation.com" + src
+                if src.startswith("/"):
+                    src = "https://www.rockwellautomation.com" + src
                 data["images"].append(src)
 
         pdf = soup.find("a", href=lambda x: x and x.endswith(".pdf"))
@@ -283,15 +295,16 @@ def parse_eaton(code: str) -> dict:
     try:
         r = requests.get(url_en, timeout=25)
         soup = BeautifulSoup(r.text, "html.parser")
-
         h = soup.find("h1")
-        if h: data["name_en"] = h.text.strip()
+        if h:
+            data["name_en"] = h.text.strip()
 
         imgs = soup.find_all("img")
         for i in imgs:
             src = i.get("src")
             if src and code.lower() in src.lower():
-                if src.startswith("/"): src = "https://www.eaton.com" + src
+                if src.startswith("/"):
+                    src = "https://www.eaton.com" + src
                 data["images"].append(src)
 
     except Exception as e:
@@ -317,7 +330,8 @@ def parse_legrand(code: str) -> dict:
         soup = BeautifulSoup(r.text, "html.parser")
 
         h = soup.find("h1")
-        if h: data["name_de"] = h.text.strip()
+        if h:
+            data["name_de"] = h.text.strip()
 
         crumbs = soup.select("ul.breadcrumb li")
         if crumbs:
@@ -329,7 +343,8 @@ def parse_legrand(code: str) -> dict:
         for i in imgs:
             src = i.get("src")
             if src and "030191" in src:
-                if src.startswith("/"): src = "https://www.legrand.at" + src
+                if src.startswith("/"):
+                    src = "https://www.legrand.at" + src
                 data["images"].append(src)
 
     except Exception as e:
@@ -351,15 +366,16 @@ def parse_wago(code: str) -> dict:
     try:
         r = requests.get(url_en, timeout=25)
         soup = BeautifulSoup(r.text, "html.parser")
-
         h = soup.find("h1")
-        if h: data["name_en"] = h.text.strip()
+        if h:
+            data["name_en"] = h.text.strip()
 
         imgs = soup.find_all("img")
         for i in imgs:
             src = i.get("src")
             if src and code in src:
-                if src.startswith("/"): src = "https://www.wago.com" + src
+                if src.startswith("/"):
+                    src = "https://www.wago.com" + src
                 data["images"].append(src)
 
     except Exception as e:
@@ -383,9 +399,9 @@ def parse_siemens(code: str) -> dict:
     try:
         r = requests.get(url, timeout=25)
         soup = BeautifulSoup(r.text, "html.parser")
-
         h = soup.find("h1")
-        if h: data["name_en"] = h.text.strip()
+        if h:
+            data["name_en"] = h.text.strip()
 
         crumbs = soup.select("ul.breadcrumb li")
         if crumbs:
@@ -397,7 +413,8 @@ def parse_siemens(code: str) -> dict:
         for i in imgs:
             src = i.get("src")
             if src and code.lower() in src.lower():
-                if src.startswith("/"): src = "https://mall.industry.siemens.com" + src
+                if src.startswith("/"):
+                    src = "https://mall.industry.siemens.com" + src
                 data["images"].append(src)
 
     except Exception as e:
@@ -407,51 +424,62 @@ def parse_siemens(code: str) -> dict:
 
 
 # ------------------------------------------------------
-# SCRAPER ROUTER
+# BRAND ROUTER
 # ------------------------------------------------------
 def scrape_by_brand(brand: str, code: str):
     b = (brand or "").lower().strip()
+    logger.info(f"[SCRAPE] brand={brand}, code={code}")
 
-    if "schneider" in b: return parse_schneider(code)
-    if "abb" in b: return parse_abb(code)
-    if "allen" in b or "rockwell" in b: return parse_allen(code)
-    if "eaton" in b: return parse_eaton(code)
-    if "legrand" in b: return parse_legrand(code)
-    if "wago" in b: return parse_wago(code)
-    if "siemens" in b: return parse_siemens(code)
+    if "schneider" in b:
+        return parse_schneider(code)
+    if "abb" in b:
+        return parse_abb(code)
+    if "allen" in b or "rockwell" in b:
+        return parse_allen(code)
+    if "eaton" in b:
+        return parse_eaton(code)
+    if "legrand" in b:
+        return parse_legrand(code)
+    if "wago" in b:
+        return parse_wago(code)
+    if "siemens" in b:
+        return parse_siemens(code)
 
-    logger.warning(f"[SCRAPE] No parser for {brand}")
+    logger.warning(f"[SCRAPE] No parser found for {brand}")
     return None
 
 
 # ------------------------------------------------------
-# MAIL (SMTP SSL)
+# MAIL SENDER (BREVO SMTP)
 # ------------------------------------------------------
 def send_mail(zip_path: str, title: str):
     try:
-        logger.info("[MAIL] Sending...")
+        logger.info("[MAIL] Sending with Brevo SMTP...")
+
+        SMTP_SERVER = os.getenv("SMTP_SERVER")
+        SMTP_PORT = int(os.getenv("SMTP_PORT"))
+        SMTP_LOGIN = os.getenv("SMTP_LOGIN")
+        SMTP_PASS = os.getenv("SMTP_PASS")
 
         msg = MIMEMultipart()
-        msg["From"] = "automations@weltrada.com"
-        msg["To"] = "automations@weltrada.com"
+        msg["From"] = SMTP_LOGIN
+        msg["To"] = SMTP_LOGIN
         msg["Subject"] = title
 
         part = MIMEBase("application", "zip")
         with open(zip_path, "rb") as f:
             part.set_payload(f.read())
         encoders.encode_base64(part)
-        part.add_header("Content-Disposition",
-                        f"attachment; filename={title}.zip")
+        part.add_header("Content-Disposition", f"attachment; filename={title}.zip")
         msg.attach(part)
 
-        password = os.getenv("MAIL_PASS")
-
-        server = smtplib.SMTP_SSL("mail.kurumsaleposta.com", 465)
-        server.login("automations@weltrada.com", password)
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_LOGIN, SMTP_PASS)
         server.send_message(msg)
         server.quit()
 
-        logger.info("[MAIL] OK")
+        logger.info("[MAIL] SENT ✓")
 
     except Exception as e:
         logger.error(f"[MAIL ERROR] {e}")
@@ -464,7 +492,6 @@ def send_mail(zip_path: str, title: str):
 async def process_products(file: UploadFile = File(...)):
     logger.info("[API] /process-products")
 
-    # Root klasör
     time_str = datetime.now().strftime("%d-%m-%Y-at-%H-%M")
     root_folder = f"Research-{time_str}"
     root_path = os.path.join(BASE_DIR, root_folder)
@@ -474,7 +501,6 @@ async def process_products(file: UploadFile = File(...)):
     os.makedirs(os.path.join(root_path, "Info/en/Breadcrumbs"), exist_ok=True)
     os.makedirs(os.path.join(root_path, "Info/tr/Sayfa-Yolları"), exist_ok=True)
 
-    # Excel dosyasını kaydet
     excel_path = os.path.join(root_path, "uploaded.xlsx")
     with open(excel_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -488,15 +514,12 @@ async def process_products(file: UploadFile = File(...)):
     for idx, row in df.iterrows():
         brand = str(row["brand"]).strip()
         code = str(row["product_code"]).strip().upper()
-
         logger.info(f"[ROW {idx}] {brand} - {code}")
 
         d = scrape_by_brand(brand, code)
         if not d:
-            logger.warning(f"[NO DATA] {brand} {code}")
             continue
 
-        # EN excel
         en_rows.append({
             "Product Code": code,
             "Brand": brand,
@@ -504,7 +527,6 @@ async def process_products(file: UploadFile = File(...)):
             "Category": d.get("category_en", d.get("category_de", ""))
         })
 
-        # TR excel
         tr_rows.append({
             "Ürün kodu": code,
             "Marka": brand,
@@ -512,21 +534,15 @@ async def process_products(file: UploadFile = File(...)):
             "Kategori": d.get("category_tr", d.get("category_en", d.get("category_de", "")))
         })
 
-        # Breadcrumbs
         bc_en = d.get("breadcrumbs_en", d.get("breadcrumbs_de", ""))
         bc_tr = d.get("breadcrumbs_tr", bc_en)
 
-        with open(os.path.join(
-            root_path, f"Info/en/Breadcrumbs/{code}-breadcrumbs.txt"
-        ), "w") as f:
+        with open(os.path.join(root_path, f"Info/en/Breadcrumbs/{code}-breadcrumbs.txt"), "w") as f:
             f.write(bc_en or "")
 
-        with open(os.path.join(
-            root_path, f"Info/tr/Sayfa-Yolları/{code}-sayfa-yolu.txt"
-        ), "w") as f:
+        with open(os.path.join(root_path, f"Info/tr/Sayfa-Yolları/{code}-sayfa-yolu.txt"), "w") as f:
             f.write(bc_tr or "")
 
-        # Görseller
         img_dir = os.path.join(root_path, "Images", code)
         os.makedirs(img_dir, exist_ok=True)
 
@@ -534,10 +550,10 @@ async def process_products(file: UploadFile = File(...)):
         for url in d.get("images", []):
             filename = f"{clean_filename(brand)}-{code.lower()}-{count:03d}.webp"
             save_path = os.path.join(img_dir, filename)
-            if download_image_to_webp(url, save_path):
+            ok = download_image_to_webp(url, save_path)
+            if ok:
                 count += 1
 
-        # Datasheets
         if d.get("datasheet_en"):
             download_file(
                 d["datasheet_en"],
@@ -550,20 +566,16 @@ async def process_products(file: UploadFile = File(...)):
                 os.path.join(root_path, f"{code}-Datasheet-tr.pdf")
             )
 
-    # Excel output
     if en_rows:
         pd.DataFrame(en_rows).to_excel(
-            os.path.join(root_path, "Info/en/products-info.xlsx"),
-            index=False
+            os.path.join(root_path, "Info/en/products-info.xlsx"), index=False
         )
 
     if tr_rows:
         pd.DataFrame(tr_rows).to_excel(
-            os.path.join(root_path, "Info/tr/ürünleri-detay.xlsx"),
-            index=False
+            os.path.join(root_path, "Info/tr/ürünleri-detay.xlsx"), index=False
         )
 
-    # ZIP
     zip_name = f"{root_folder}.zip"
     zip_path = os.path.join(BASE_DIR, zip_name)
 
@@ -574,8 +586,8 @@ async def process_products(file: UploadFile = File(...)):
                 rel = os.path.relpath(fp, root_path)
                 z.write(fp, rel)
 
-    # MAIL
     send_mail(zip_path, root_folder)
 
     logger.info("[API] DONE ✓")
+
     return {"status": "success", "zip": zip_name}
