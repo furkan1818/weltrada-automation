@@ -229,19 +229,42 @@ def parse_abb(code):
     return data
 
 
-# ------------------------------------------------------
-# SCRAPER ROUTER
-# ------------------------------------------------------
+# -------------------------------------------
+# SCRAPER ROUTER (TÜM MARKALAR EKLENDİ)
+# -------------------------------------------
 def scrape_by_brand(brand, code):
-    b = brand.lower()
+    b = brand.lower().strip()
 
+    # Schneider Electric
     if "schneider" in b:
         return parse_schneider(code)
 
+    # ABB Group
     if "abb" in b:
         return parse_abb(code)
 
-    return None   # Burası genişletilecek (Eaton, Siemens vs. ekleyebilirim)
+    # Allen Bradley (Rockwell Automation)
+    if "allen" in b or "rockwell" in b or "bradley" in b:
+        return parse_allen(code)
+
+    # Eaton
+    if "eaton" in b:
+        return parse_eaton(code)
+
+    # Legrand (Almanca)
+    if "legrand" in b:
+        return parse_legrand(code)
+
+    # Wago
+    if "wago" in b:
+        return parse_wago(code)
+
+    # Siemens
+    if "siemens" in b:
+        return parse_siemens(code)
+
+    # Eğer hiçbir parser eşleşmezse:
+    return None
 
 
 # ------------------------------------------------------
