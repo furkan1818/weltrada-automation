@@ -1,7 +1,7 @@
-services:
-  - type: web
-    name: weltrada-automation
-    env: python
-    pythonVersion: 3.10
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+fastapi
+uvicorn
+pandas==2.1.4
+openpyxl
+requests
+pillow
+python-multipart
