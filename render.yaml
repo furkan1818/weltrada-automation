@@ -1,9 +1,7 @@
 services:
   - type: web
     name: weltrada-automation
-    runtime: python
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    env: python
+    pythonVersion: 3.10
+    buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
-    envVars:
-      - key: RAPIDAPI_KEY
-        sync: false
